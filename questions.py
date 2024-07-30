@@ -411,10 +411,11 @@ questions = [{
 }]
 
 def get_random_question():
-    return random.choice(questions)
+    question_data = random.choice(questions)
+    return question_data["question"], question_data["answers"]
 
 def check_answer(question, user_answer):
-    for i, (answer, points) in enumerate(question[1]):
+    for idx, (answer, points) in enumerate(question[1]):
         if user_answer.lower() == answer.lower():
-            return i, points
+            return idx, points
     return -1, 0
