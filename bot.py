@@ -1,14 +1,19 @@
 import logging
 import os
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackContext
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from dotenv import load_dotenv
 from questions import get_random_question, check_answer
-from config import TOKEN, OWNER_ID, API_ID, API_HASH
 
-# Load environment variables if running locally
-if os.getenv('ENV') != 'HEROKU':
-    from dotenv import load_dotenv
-    load_dotenv()
+# Load environment variables
+load_dotenv()
+
+API_ID = int(os.getenv("API_ID"))
+API_HASH = os.getenv("API_HASH")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+OWNER_ID = int(os.getenv("OWNER_ID"))
+
+app = Client("super_family_100_bot", api_id=API_ID, api_hash=API_HASH, bot_token=BOT_TOKEN)
 
 # Setup logging
 logging.basicConfig(
@@ -27,19 +32,20 @@ group_scores = {}
 blacklisted_users = set()
 blacklisted_groups = set()
 
-async def start(update: Update, context: CallbackContext) -> None:
-    user_fullname = update.message.from_user.full_name
-    chat_id = update.message.chat.id
-    if update.message.chat.type in ["group", "supergroup"]:
-        logger.info(f"Bot joined a group: {update.message.chat.title} ({chat_id})")
+@app.on_message(filters.command("start") & (filters.private | filters.group))
+async def start(client, message):
+    user_fullname = message.from_user.first_name
+    chat_id = message.chat.id
+    if message.chat.type in ["group", "supergroup"]:
+        logger.info(f"Bot joined a group: {message.chat.title} ({chat_id})")
     else:
-        logger.info(f"User started bot: {user_fullname} ({update.message.from_user.id})")
+        logger.info(f"User started bot: {user_fullname} ({message.from_user.id})")
 
     keyboard = [
         [InlineKeyboardButton("Support", url="https://t.me/+bRlP2S66_g45MTFl")],
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
+    await message.reply_text(
         f"Halo {user_fullname}, ayo kita main Super Family 100.\n"
         "/play : mulai game\n"
         "/nyerah : menyerah dari game\n"
@@ -52,8 +58,9 @@ async def start(update: Update, context: CallbackContext) -> None:
         reply_markup=reply_markup
     )
 
-async def bantuan(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text(
+@app.on_message(filters.command("help") & (filters.private | filters.group))
+async def bantuan(client, message):
+    await message.reply_text(
         "/play : mulai game\n"
         "/nyerah : menyerah dari game\n"
         "/next : Pertanyaan berikutnya\n"
@@ -71,47 +78,46 @@ def format_question(question, correct_answers):
 def update_question_format(question, correct_answers):
     return format_question(question, correct_answers)
 
-async def play(update: Update, context: CallbackContext) -> None:
-    if update.message.from_user.id in blacklisted_users or update.message.chat.id in blacklisted_groups:
-        await update.message.reply_text("Anda atau grup ini telah diblokir dari permainan.")
+@app.on_message(filters.command("play") & (filters.private | filters.group))
+async def play(client, message):
+    if message.from_user.id in blacklisted_users or message.chat.id in blacklisted_groups:
+        await message.reply_text("Anda atau grup ini telah diblokir dari permainan.")
         return
 
     question, answers = get_random_question()
-    context.chat_data['current_question'] = question
+    context.chat_data['current_question'] = (question, answers)
     context.chat_data['correct_answers'] = ["_" * len(ans) for ans, _ in answers]
-    context.chat_data['all_answers'] = answers
     formatted_question = format_question(question, context.chat_data['correct_answers'])
-    await update.message.reply_text(formatted_question)
+    await message.reply_text(formatted_question)
 
-async def handle_answer(update: Update, context: CallbackContext) -> None:
+@app.on_message(filters.text & ~filters.command & (filters.group | filters.private))
+async def handle_answer(client, message):
     if 'current_question' not in context.chat_data:
         return
 
-    user_answer = update.message.text.strip()
+    user_answer = message.text.strip()
     question = context.chat_data['current_question']
-    all_answers = context.chat_data['all_answers']
     correct_answers = context.chat_data['correct_answers']
     
     logger.debug(f"User answer: {user_answer}")
     logger.debug(f"Current question: {question}")
-    logger.debug(f"All answers: {all_answers}")
     logger.debug(f"Correct answers so far: {correct_answers}")
 
     index, points = check_answer(question, user_answer)
     logger.debug(f"Index of the correct answer: {index}, Points: {points}")
     
     if index != -1:
-        correct_answers[index] = all_answers[index][0]
-        formatted_question = update_question_format(question, correct_answers)
+        correct_answers[index] = question[1][index][0]
+        formatted_question = update_question_format(question[0], correct_answers)
         
-        await update.message.reply_text(f"Jawaban benar! Poin: {points}\n{formatted_question}")
+        await message.reply_text(f"Jawaban benar! Poin: {points}\n{formatted_question}")
 
-        user_name = update.message.from_user.username
+        user_name = message.from_user.username
         if user_name not in user_scores:
             user_scores[user_name] = 0
         user_scores[user_name] += points
 
-        chat_id = update.message.chat.id
+        chat_id = message.chat.id
         if chat_id not in group_scores:
             group_scores[chat_id] = {}
         if user_name not in group_scores[chat_id]:
@@ -119,23 +125,24 @@ async def handle_answer(update: Update, context: CallbackContext) -> None:
         group_scores[chat_id][user_name] += points
 
         context.chat_data['current_question'] = None
-        context.chat_data['all_answers'] = None
         context.chat_data['correct_answers'] = None
 
-async def nyerah(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text("Anda telah menyerah dari game.")
+@app.on_message(filters.command("nyerah") & (filters.private | filters.group))
+async def nyerah(client, message):
+    await message.reply_text("Anda telah menyerah dari game.")
 
-async def next(update: Update, context: CallbackContext) -> None:
+@app.on_message(filters.command("next") & (filters.private | filters.group))
+async def next(client, message):
     question, answers = get_random_question()
-    context.chat_data['current_question'] = question
+    context.chat_data['current_question'] = (question, answers)
     context.chat_data['correct_answers'] = ["_" * len(ans) for ans, _ in answers]
-    context.chat_data['all_answers'] = answers
     formatted_question = format_question(question, context.chat_data['correct_answers'])
-    await update.message.reply_text(formatted_question)
+    await message.reply_text(formatted_question)
 
-async def stats(update: Update, context: CallbackContext) -> None:
-    user_name = update.message.from_user.username
-    user_id = update.message.from_user.id
+@app.on_message(filters.command("stats") & (filters.private | filters.group))
+async def stats(client, message):
+    user_name = message.from_user.username
+    user_id = message.from_user.id
     user_score = user_scores.get(user_name, 0)
     
     global_rank = len(user_scores)
@@ -146,18 +153,20 @@ async def stats(update: Update, context: CallbackContext) -> None:
         f"🏅 Name: {user_name}\n"
         f"🌐 Score: {user_score}\n"
     )
-    await update.message.reply_text(stats_message)
+    await message.reply_text(stats_message)
 
-async def top(update: Update, context: CallbackContext) -> None:
+@app.on_message(filters.command("top") & (filters.private | filters.group))
+async def top(client, message):
     top_players = sorted(user_scores.items(), key=lambda x: x[1], reverse=True)
     formatted_top_players = [
         f"{i + 1}. {'🥇' if i == 0 else '🥈' if i == 1 else '🥉' if i == 2 else '🏅'} {player} - {score}"
         for i, (player, score) in enumerate(top_players[:10])
     ]
-    await update.message.reply_text("Top Player Global:\n" + "\n".join(formatted_top_players))
+    await message.reply_text("Top Player Global:\n" + "\n".join(formatted_top_players))
 
-async def topgrup(update: Update, context: CallbackContext) -> None:
-    chat_id = update.message.chat.id
+@app.on_message(filters.command("topgrup") & (filters.private | filters.group))
+async def topgrup(client, message):
+    chat_id = message.chat.id
     if chat_id not in group_scores:
         group_scores[chat_id] = {}
     
@@ -166,10 +175,11 @@ async def topgrup(update: Update, context: CallbackContext) -> None:
         f"{i + 1}. {'🥇' if i == 0 else '🥈' if i == 1 else '🥉' if i == 2 else '🏅'} {player} - {score}"
         for i, (player, score) in enumerate(top_group_players[:10])
     ]
-    await update.message.reply_text("Top Player Grup:\n" + "\n".join(formatted_top_group_players))
+    await message.reply_text("Top Player Grup:\n" + "\n".join(formatted_top_group_players))
 
-async def peraturan(update: Update, context: CallbackContext) -> None:
-    await update.message.reply_text(
+@app.on_message(filters.command("peraturan") & (filters.private | filters.group))
+async def peraturan(client, message):
+    await message.reply_text(
         "<b>Peraturan bermain adalah:</b>\n\n"
         "1. Mulai permainan dengan mengetik /play.\n"
         "2. Anda akan diberikan pertanyaan dan harus menjawabnya.\n"
@@ -182,69 +192,44 @@ async def peraturan(update: Update, context: CallbackContext) -> None:
         parse_mode='HTML'
     )
 
-async def blacklist(update: Update, context: CallbackContext) -> None:
-    if update.message.from_user.id != OWNER_ID:
-        await update.message.reply_text("Anda tidak memiliki izin untuk menggunakan perintah ini.")
-        return
-
-    args = context.args
-    if not args:
-        await update.message.reply_text("Penggunaan: /blacklist [user_id/grup_id]")
+@app.on_message(filters.command("blacklist") & filters.user(OWNER_ID))
+async def blacklist(client, message):
+    args = message.command
+    if len(args) < 2:
+        await message.reply_text("Penggunaan: /blacklist [user_id/grup_id]")
         return
 
     try:
-        target_id = int(args[0])
+        target_id = int(args[1])
         if target_id < 0:
             blacklisted_groups.add(target_id)
-            await update.message.reply_text(f"Grup {target_id} telah diblacklist.")
-            logger.info(f"Group {target_id} blacklisted by {update.message.from_user.username}.")
+            await message.reply_text(f"Grup {target_id} telah diblacklist.")
+            logger.info(f"Group {target_id} blacklisted by {message.from_user.username}.")
         else:
             blacklisted_users.add(target_id)
-            await update.message.reply_text(f"User {target_id} telah diblacklist.")
-            logger.info(f"User {target_id} blacklisted by {update.message.from_user.username}.")
+            await message.reply_text(f"User {target_id} telah diblacklist.")
+            logger.info(f"User {target_id} blacklisted by {message.from_user.username}.")
     except ValueError:
-        await update.message.reply_text("ID harus berupa angka.")
+        await message.reply_text("ID harus berupa angka.")
 
-async def whitelist(update: Update, context: CallbackContext) -> None:
-    if update.message.from_user.id != OWNER_ID:
-        await update.message.reply_text("Anda tidak memiliki izin untuk menggunakan perintah ini.")
-        return
-
-    args = context.args
-    if not args:
-        await update.message.reply_text("Penggunaan: /whitelist [user_id/grup_id]")
+@app.on_message(filters.command("whitelist") & filters.user(OWNER_ID))
+async def whitelist(client, message):
+    args = message.command
+    if len(args) < 2:
+        await message.reply_text("Penggunaan: /whitelist [user_id/grup_id]")
         return
 
     try:
-        target_id = int(args[0])
+        target_id = int(args[1])
         if target_id < 0:
             blacklisted_groups.discard(target_id)
-            await update.message.reply_text(f"Grup {target_id} telah dihapus dari blacklist.")
-            logger.info(f"Group {target_id} removed from blacklist by {update.message.from_user.username}.")
+            await message.reply_text(f"Grup {target_id} telah dihapus dari blacklist.")
+            logger.info(f"Group {target_id} removed from blacklist by {message.from_user.username}.")
         else:
             blacklisted_users.discard(target_id)
-            await update.message.reply_text(f"User {target_id} telah dihapus dari blacklist.")
-            logger.info(f"User {target_id} removed from blacklist by {update.message.from_user.username}.")
+            await message.reply_text(f"User {target_id} telah dihapus dari blacklist.")
+            logger.info(f"User {target_id} removed from blacklist by {message.from_user.username}.")
     except ValueError:
-        await update.message.reply_text("ID harus berupa angka.")
+        await message.reply_text("ID harus berupa angka.")
 
-def main():
-    application = Application.builder().token(TOKEN).build()
-
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", bantuan))
-    application.add_handler(CommandHandler("play", play))
-    application.add_handler(CommandHandler("nyerah", nyerah))
-    application.add_handler(CommandHandler("next", next))
-    application.add_handler(CommandHandler("stats", stats))
-    application.add_handler(CommandHandler("top", top))
-    application.add_handler(CommandHandler("topgrup", topgrup))
-    application.add_handler(CommandHandler("peraturan", peraturan))
-    application.add_handler(CommandHandler("blacklist", blacklist))
-    application.add_handler(CommandHandler("whitelist", whitelist))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer))
-
-    application.run_polling()
-
-if __name__ == "__main__":
-    main()
+app.run()
