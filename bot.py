@@ -85,20 +85,22 @@ async def play(client, message):
         return
 
     question, answers = get_random_question()
-    context.chat_data['current_question'] = (question, answers)
-    context.chat_data['correct_answers'] = ["_" * len(ans) for ans, _ in answers]
-    formatted_question = format_question(question, context.chat_data['correct_answers'])
+    client.current_question = question
+    client.correct_answers = ["_" * len(ans) for ans, _ in answers]
+    client.all_answers = answers
+    formatted_question = format_question(question, client.correct_answers)
     await message.reply_text(formatted_question)
 
 @app.on_message(filters.text & ~filters.command & (filters.group | filters.private))
 async def handle_answer(client, message):
-    if 'current_question' not in context.chat_data:
+    if not hasattr(client, 'current_question'):
         return
 
     user_answer = message.text.strip()
-    question = context.chat_data['current_question']
-    correct_answers = context.chat_data['correct_answers']
-    
+    question = client.current_question
+    correct_answers = client.correct_answers
+    all_answers = client.all_answers
+
     logger.debug(f"User answer: {user_answer}")
     logger.debug(f"Current question: {question}")
     logger.debug(f"Correct answers so far: {correct_answers}")
@@ -107,8 +109,8 @@ async def handle_answer(client, message):
     logger.debug(f"Index of the correct answer: {index}, Points: {points}")
     
     if index != -1:
-        correct_answers[index] = question[1][index][0]
-        formatted_question = update_question_format(question[0], correct_answers)
+        correct_answers[index] = all_answers[index][0]
+        formatted_question = update_question_format(question, correct_answers)
         
         await message.reply_text(f"Jawaban benar! Poin: {points}\n{formatted_question}")
 
@@ -124,8 +126,9 @@ async def handle_answer(client, message):
             group_scores[chat_id][user_name] = 0
         group_scores[chat_id][user_name] += points
 
-        context.chat_data['current_question'] = None
-        context.chat_data['correct_answers'] = None
+        del client.current_question
+        del client.correct_answers
+        del client.all_answers
 
 @app.on_message(filters.command("nyerah") & (filters.private | filters.group))
 async def nyerah(client, message):
@@ -134,9 +137,10 @@ async def nyerah(client, message):
 @app.on_message(filters.command("next") & (filters.private | filters.group))
 async def next(client, message):
     question, answers = get_random_question()
-    context.chat_data['current_question'] = (question, answers)
-    context.chat_data['correct_answers'] = ["_" * len(ans) for ans, _ in answers]
-    formatted_question = format_question(question, context.chat_data['correct_answers'])
+    client.current_question = question
+    client.correct_answers = ["_" * len(ans) for ans, _ in answers]
+    client.all_answers = answers
+    formatted_question = format_question(question, client.correct_answers)
     await message.reply_text(formatted_question)
 
 @app.on_message(filters.command("stats") & (filters.private | filters.group))
