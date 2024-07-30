@@ -7,7 +7,7 @@ Bot Telegram untuk permainan Super Family 100. Bot ini menyediakan permainan kui
 
 ## Struktur Proyek
 
-```
+
 your_project/
 │
 ├── bot.py
@@ -18,7 +18,7 @@ your_project/
 ├── Procfile
 ├── README.md
 └── .env
-```
+
 
 ## Persyaratan
 
